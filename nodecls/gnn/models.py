@@ -148,13 +148,23 @@ class GNNModel(L.LightningModule):
             y = y[masks]
         loss = self.criterion(outputs, y)
         return loss, outputs, y
-    
-    def training_step(self, batch, batch_idx):
+
+    def forward_step(self, batch, batch_idx, step_mode):
         x = batch["x"]
         labels = batch["y"]
         masks = batch["masks"]
         edge_index = batch["edge_index"]
-        loss, _, _ = self.forward(x, labels, edge_index, masks)
+        loss, outputs, labels = self.forward(x, labels, edge_index, masks)
+        if step_mode in ["val", "test"]:
+            if self.eval_metric in ["f1", "accuracy"]:
+                outputs = outputs.argmax(dim=-1)
+            elif self.eval_metric == "auc":
+                outputs = torch.softmax(outputs, dim=-1)[:, 1]
+        return loss, outputs, labels
+
+    def training_step(self, batch, batch_idx):
+        loss, _, _ = self.forward_step(
+            batch, batch_idx, step_mode="train")
         self.log(
             "train_loss",
             loss,
@@ -165,17 +175,10 @@ class GNNModel(L.LightningModule):
             sync_dist=True,
         )
         return loss
-    
+
     def validation_step(self, batch, batch_idx):
-        x = batch["x"]
-        labels = batch["y"]
-        masks = batch["masks"]
-        edge_index = batch["edge_index"]
-        loss, outputs, labels = self.forward(x, labels, edge_index, masks)
-        if self.eval_metric in ["f1", "accuracy"]:
-            outputs = outputs.argmax(dim=-1)
-        elif self.eval_metric == "auc":
-            outputs = torch.softmax(outputs, dim=-1)[:, 1]
+        loss, outputs, labels = self.forward_step(
+            batch, batch_idx, step_mode="val")
         self.metric(outputs, labels)
         self.log_dict(
             {"val_loss": loss, "val_result": self.metric},
@@ -185,21 +188,14 @@ class GNNModel(L.LightningModule):
             logger=True,
             sync_dist=True,
         )
-    
+
     def test_step(self, batch, batch_idx):
-        x = batch["x"]
-        labels = batch["y"]
-        masks = batch["masks"]
-        edge_index = batch["edge_index"]
-        loss, outputs, labels = self.forward(x, labels, edge_index, masks)
-        if self.eval_metric in ["f1", "accuracy"]:
-            outputs = outputs.argmax(dim=-1)
-        elif self.eval_metric == "auc":
-            outputs = torch.softmax(outputs, dim=-1)[:, 1]
+        loss, outputs, labels = self.forward_step(
+            batch, batch_idx, step_mode="test")
         self.test_outputs.append(
             {"loss": loss.item(), "predictions": outputs, "labels": labels}
         )
-    
+
     def on_test_epoch_end(self):
         predictions = torch.cat(
             [output["predictions"] for output in self.test_outputs]
@@ -216,7 +212,7 @@ class GNNModel(L.LightningModule):
         )
         self.test_outputs.clear()
         self.metric.reset()
-    
+
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(
             self.parameters(), lr=self.learning_rate)
