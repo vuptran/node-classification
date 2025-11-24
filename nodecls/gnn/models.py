@@ -1,0 +1,223 @@
+import lightning as L
+
+import torch
+import torch.nn as nn
+
+from torch_geometric.nn import (
+    GATConv,
+    GATv2Conv,
+    SAGEConv
+
+)
+
+from torchmetrics import (
+    AUROC,
+    F1Score,
+    Accuracy,
+    MeanSquaredError
+)
+
+
+CONV_TYPES = {
+    "GAT": GATConv,
+    "GATv2": GATv2Conv,
+    "GraphSAGE": SAGEConv,
+}
+
+    
+class MessagePassingNN(nn.Module):
+    def __init__(
+        self,
+        in_channels,
+        hidden_channels,
+        out_channels,
+        layer_name="GraphSAGE",
+        residual=True,
+        batch_norm=True,
+        num_layers=3,
+        in_dropout=0.1,
+        dropout=0.5,
+    ):
+        super(MessagePassingNN, self).__init__()
+        self.num_layers = num_layers
+        self.in_dropout = in_dropout
+        self.batch_norm = batch_norm
+        self.residual = residual
+        
+        self.conv_layers = nn.ModuleList()
+        if self.batch_norm:
+            self.bn_layers = nn.ModuleList()
+            self.bn_layers.extend([
+                nn.BatchNorm1d(hidden_channels)
+                for _ in range(num_layers)
+            ])
+        self.proj_layers = nn.ModuleList()
+        
+        layer_conv = CONV_TYPES[layer_name]
+        channels = in_channels
+        for _ in range(num_layers):
+            self.conv_layers.append(
+                layer_conv(
+                    in_channels=channels,
+                    out_channels=hidden_channels,
+                )
+            )
+            self.proj_layers.append(
+                nn.Linear(channels, hidden_channels)
+            )
+            channels = hidden_channels
+        
+        self.activation = nn.ReLU(inplace=True)
+        self.input_dropout = nn.Dropout(in_dropout)
+        self.dropout = nn.Dropout(dropout)
+        self.linear_head = nn.Linear(hidden_channels, out_channels)
+                                  
+    def forward(self, x, edge_index, return_embeddings=False):
+        if self.in_dropout:
+            x = self.input_dropout(x)
+        
+        for i in range(self.num_layers):
+            z = x
+            x = self.conv_layers[i](x, edge_index)
+            if self.residual:
+                z = self.proj_layers[i](z)
+                x = x + z
+            if self.batch_norm:
+                x = self.bn_layers[i](x)
+            x = self.activation(x)
+            x = self.dropout(x)
+        
+        linear_predictions = self.linear_head(x)
+        if return_embeddings:
+            return linear_predictions, x
+        else:
+            return linear_predictions
+
+
+class GNNModel(L.LightningModule):
+    def __init__(
+        self,
+        in_channels,
+        hidden_channels=128,
+        out_channels=1,
+        layer_name="GraphSAGE",
+        residual=True,
+        batch_norm=True,
+        num_layers=3,
+        in_dropout=0.1,
+        dropout=0.5,
+        learning_rate=0.001,
+        eval_metric="accuracy",
+    ):
+        super().__init__()
+        self.eval_metric = eval_metric
+        self.model = MessagePassingNN(
+            in_channels=in_channels,
+            hidden_channels=hidden_channels,
+            out_channels=out_channels,
+            layer_name=layer_name,
+            residual=residual,
+            batch_norm=batch_norm,
+            num_layers=num_layers,
+            in_dropout=in_dropout,
+            dropout=dropout,
+        )
+        self.test_outputs = []
+        self.criterion = nn.CrossEntropyLoss()
+        if eval_metric in ["f1", "accuracy"]:
+            METRICS = {
+                "f1": F1Score,
+                "accuracy": Accuracy,
+            }
+            self.metric = METRICS[eval_metric](
+                task="multiclass",
+                num_classes=out_channels,
+                average="micro",
+            )
+        elif eval_metric == "auc":
+            self.metric = AUROC(task="binary")
+        elif eval_metric == "mse":
+            self.criterion = nn.MSELoss()
+            self.metric = MeanSquaredError()
+        self.learning_rate = learning_rate
+
+    def forward(self, x, y, edge_index, masks=None):
+        outputs = self.model(x, edge_index)
+        if masks is not None:
+            outputs = outputs[masks]
+            y = y[masks]
+        loss = self.criterion(outputs, y)
+        return loss, outputs, y
+    
+    def training_step(self, batch, batch_idx):
+        x = batch["x"]
+        labels = batch["y"]
+        masks = batch["masks"]
+        edge_index = batch["edge_index"]
+        loss, _, _ = self.forward(x, labels, edge_index, masks)
+        self.log(
+            "train_loss",
+            loss,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            logger=True,
+            sync_dist=True,
+        )
+        return loss
+    
+    def validation_step(self, batch, batch_idx):
+        x = batch["x"]
+        labels = batch["y"]
+        masks = batch["masks"]
+        edge_index = batch["edge_index"]
+        loss, outputs, labels = self.forward(x, labels, edge_index, masks)
+        if self.eval_metric in ["f1", "accuracy"]:
+            outputs = outputs.argmax(dim=-1)
+        elif self.eval_metric == "auc":
+            outputs = torch.softmax(outputs, dim=-1)[:, 1]
+        self.metric(outputs, labels)
+        self.log_dict(
+            {"val_loss": loss, "val_result": self.metric},
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            logger=True,
+            sync_dist=True,
+        )
+    
+    def test_step(self, batch, batch_idx):
+        x = batch["x"]
+        labels = batch["y"]
+        masks = batch["masks"]
+        edge_index = batch["edge_index"]
+        loss, outputs, labels = self.forward(x, labels, edge_index, masks)
+        if self.eval_metric in ["f1", "accuracy"]:
+            outputs = outputs.argmax(dim=-1)
+        elif self.eval_metric == "auc":
+            outputs = torch.softmax(outputs, dim=-1)[:, 1]
+        self.test_outputs.append(
+            {"loss": loss.item(), "predictions": outputs, "labels": labels}
+        )
+    
+    def on_test_epoch_end(self):
+        predictions = torch.cat(
+            [output["predictions"] for output in self.test_outputs]
+        )
+        labels = torch.cat(
+            [output["labels"] for output in self.test_outputs]
+        )
+        test_loss = sum(
+            output["loss"] for output in self.test_outputs
+        ) / len(self.test_outputs)
+        test_metric = self.metric(predictions, labels)
+        self.log_dict(
+            {"test_loss": test_loss, f"test_{self.eval_metric}": test_metric}
+        )
+        self.test_outputs.clear()
+        self.metric.reset()
+    
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(
+            self.parameters(), lr=self.learning_rate)
+        return optimizer
