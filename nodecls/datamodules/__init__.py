@@ -1,2 +1,2 @@
-from .datamodules import GraphDataModule
+from .datamodules import NumPyDataModule, GraphDataModule
 from .datasets import NumPyDataset

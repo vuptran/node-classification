@@ -7,12 +7,16 @@ class NumPyDataset(Dataset):
         self,
         data_path: str,
         split_type: str,
+        apply_masking: bool=False,
     ):
         assert split_type in ["train", "val", "test"]
         data = np.load(data_path, allow_pickle=True)
         self.masks = data[f"{split_type}_masks"]
         self.feats = data["features"].astype(np.float32)
         self.labels = data["labels"].astype(np.int64)
+        if apply_masking:
+            self.feats = self.feats[self.masks]
+            self.labels = self.labels[self.masks]
 
     def __len__(self):
         return len(self.labels)
