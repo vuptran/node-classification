@@ -1,0 +1,15 @@
+name: node-classification
+channels:
+  - pytorch
+  - conda-forge
+dependencies:
+  - python=3.11.13
+  - pytorch=2.7.1
+  - torchvision=0.22.1
+  - cudatoolkit=11.8
+  - pip
+  - pip:
+    - torch-geometric==2.6.1
+    - lightning==2.5.4
+    - -r ../../requirements.txt
+    - -e ../../.
