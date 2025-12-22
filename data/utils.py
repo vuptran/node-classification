@@ -63,6 +63,8 @@ def convert_pokec(
         test_masks=test_masks,
         val_masks=val_masks,
         num_nodes=num_nodes,
+        undirected=True,
+        add_self_loops=True,
     )
 
 
@@ -129,4 +131,6 @@ def convert_ogbn_datasets(
         test_masks=test_masks,
         val_masks=val_masks,
         num_nodes=num_nodes,
+        undirected=meta_info["add_inverse_edge"],
+        add_self_loops=True,
     )
