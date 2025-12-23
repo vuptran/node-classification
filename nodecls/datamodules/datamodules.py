@@ -109,12 +109,14 @@ class GraphDataModule(L.LightningDataModule):
             data["num_nodes"], dtype=torch.long)
         self.edge_indices = torch.as_tensor(
             data["edge_indices"], dtype=torch.long)
-        self.edge_indices = to_undirected(self.edge_indices)
-        self.edge_indices, _ = remove_self_loops(self.edge_indices)
-        self.edge_indices, _ = add_self_loops(
-            self.edge_indices,
-            num_nodes=self.num_nodes, 
-        )
+        if data["undirected"]:
+            self.edge_indices = to_undirected(self.edge_indices)
+        if data["add_self_loops"]:
+            self.edge_indices, _ = remove_self_loops(self.edge_indices)
+            self.edge_indices, _ = add_self_loops(
+                self.edge_indices,
+                num_nodes=self.num_nodes,
+            )
     
     def train_dataloader(self):
         return DataLoader(
