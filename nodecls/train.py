@@ -51,6 +51,7 @@ if __name__ == "__main__":
     parser.add_argument("--train-batch-size", type=int, default=4096)
     parser.add_argument("--test-batch-size", type=int, default=4096 * 2)
     parser.add_argument("--num-workers", type=int, default=4)
+    parser.add_argument("--oversample-thr", type=float, default=0.0)
     parser.add_argument("--num-devices", type=int, default=1)
     parser.add_argument("--seed", type=int, default=1108)
     parser.add_argument("--test-on-gpu", action="store_true")
@@ -84,6 +85,7 @@ if __name__ == "__main__":
             train_batch_size=args.train_batch_size,
             test_batch_size=args.test_batch_size,
             num_workers=args.num_workers,
+            oversample_thr=args.oversample_thr,
         )
         modelmodule = MLPModel(
             in_channels=datamodule.train_dataset[0]["x"].shape[-1],
