@@ -2,7 +2,7 @@ import lightning as L
 import numpy as np
 import torch
 
-from .datasets import NumPyDataset
+from .datasets import NumPyDataset, ClassBalancedDataset
 from torch.utils.data import DataLoader
 
 from torch_geometric.utils import (
@@ -20,12 +20,14 @@ class NumPyDataModule(L.LightningDataModule):
         train_batch_size=4096,
         test_batch_size=4096 * 2,
         num_workers=4,
+        oversample_thr=0.0,
     ):
         super().__init__()
         self.data_path = data_path
         self.train_batch_size = train_batch_size
         self.test_batch_size = test_batch_size
         self.num_workers = num_workers
+        self.oversample_thr = oversample_thr
 
         self.train_dataset = NumPyDataset(
             data_path,
@@ -42,6 +44,12 @@ class NumPyDataModule(L.LightningDataModule):
             split_type="test",
             apply_masking=True,
         )
+
+        if self.oversample_thr:
+            self.train_dataset = ClassBalancedDataset(
+                self.train_dataset,
+                self.oversample_thr,
+            )
     
     def train_dataloader(self):
         return DataLoader(
