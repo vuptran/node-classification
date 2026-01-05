@@ -9,7 +9,4 @@ dependencies:
   - cudatoolkit=11.8
   - pip
   - pip:
-    - torch-geometric==2.6.1
-    - lightning==2.5.4
-    - -r ../../requirements.txt
     - -e ../../.

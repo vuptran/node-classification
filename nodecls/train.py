@@ -6,8 +6,7 @@ import random
 import torch
 
 from datamodules import NumPyDataModule, GraphDataModule
-from gnn.models import GNNModel
-from mlp.models import MLPModel
+from models import GNNModel, MLPModel
 
 from lightning.pytorch.callbacks import ModelCheckpoint
 

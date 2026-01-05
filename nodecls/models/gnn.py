@@ -24,7 +24,7 @@ CONV_TYPES = {
     "GraphSAGE": SAGEConv,
 }
 
-    
+
 class MessagePassingNN(nn.Module):
     def __init__(
         self,
